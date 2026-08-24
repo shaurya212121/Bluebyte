@@ -1,39 +1,102 @@
+"""
+server/algorithms/test_algorithms.py
+Unit tests verifying KD-Tree performance & Current-Aware Pathfinding.
+"""
+
 import pytest
-from .kdtree import KDTree
-from .pathfinding import OceanGrid
-from .clustering import identify_pfz_zones
+import math
+from server.algorithms.kdtree import KDTree, haversine_distance
+from server.algorithms.clustering import FishCluster, FishClusterSpatialIndex
+from server.algorithms.pathfinding import OceanGridGraph, a_star_pathfinding, dijkstra_pathfinding
 
-def test_kdtree():
-    tree = KDTree()
-    points = [
-        (10.0, 10.0, "A"), (10.1, 10.1, "B"), (10.2, 10.2, "C"),
-        (20.0, 20.0, "D"), (20.1, 20.1, "E"), (20.2, 20.2, "F"),
-        (30.0, 30.0, "G"), (30.1, 30.1, "H"), (30.2, 30.2, "I"),
-        (40.0, 40.0, "J")
+
+def test_haversine_accuracy():
+    # Mumbai to Goa ~ 430-440 km
+    mumbai = (18.9220, 72.8347)
+    goa = (15.4909, 73.8278)
+    d = haversine_distance(mumbai, goa)
+    assert 380.0 < d < 450.0
+
+
+def test_kdtree_exact_nearest_lookup():
+    clusters = [
+        FishCluster("C1", 15.0, 72.0, "Tuna", 45.2, 30.0, 28.5, 35.0, 0.92),
+        FishCluster("C2", 16.0, 73.0, "Mackerel", 80.0, 15.0, 29.1, 34.5, 0.88),
+        FishCluster("C3", 18.0, 72.5, "Sardine", 120.5, 10.0, 27.8, 35.2, 0.95),
+        FishCluster("C4", 12.0, 74.0, "Anchovy", 30.0, 50.0, 26.5, 36.0, 0.85)
     ]
-    tree.build_from_points(points)
     
-    res = tree.nearest((10.05, 10.05), k=1)
-    assert res[0][1] in ["A", "B"]
+    spatial_index = FishClusterSpatialIndex(clusters)
     
-    res = tree.range_query((10.0, 10.0), 50)
-    assert len(res) == 3
+    # Query very close to C3 (18.0, 72.5)
+    res = spatial_index.find_nearest_cluster(18.01, 72.51)
+    assert res["nearest_cluster"]["cluster_id"] == "C3"
+    assert res["distance_km"] < 5.0
 
-def test_pathfinding():
-    grid = OceanGrid(lat_min=10.0, lat_max=20.0, lon_min=70.0, lon_max=80.0, resolution=1.0)
-    route, cost = grid.find_route(11.0, 71.0, 18.0, 78.0, use_currents=False)
-    assert len(route) > 0
-    assert route[0] == (11.0, 71.0)
-    assert route[-1] == (18.0, 78.0)
 
-def test_clustering():
-    sample_obs = [
-        {'lat': 15.0, 'lon': 73.0, 'sst': 28.5, 'chlorophyll_a': 2.5},
-        {'lat': 15.1, 'lon': 73.1, 'sst': 28.3, 'chlorophyll_a': 2.8},
-        {'lat': 15.2, 'lon': 73.0, 'sst': 28.4, 'chlorophyll_a': 2.1},
-        {'lat': 15.3, 'lon': 73.0, 'sst': 28.5, 'chlorophyll_a': 1.8},
-        {'lat': 10.0, 'lon': 70.0, 'sst': 20.0, 'chlorophyll_a': 0.5},
+def test_kdtree_k_nearest():
+    points = [((float(i), float(i)), f"P{i}") for i in range(20)]
+    tree = KDTree(points, dimensions=2, is_geospatial=False)
+    
+    knn = tree.k_nearest_neighbors((5.1, 5.1), k=3)
+    assert len(knn) == 3
+    assert knn[0]["payload"] == "P5"
+    assert knn[1]["payload"] in ["P4", "P6"]
+
+
+def test_kdtree_radius_search():
+    clusters = [
+        FishCluster("C1", 15.0, 72.0, "Tuna", 50.0, 20.0, 28.0, 35.0, 0.9),
+        FishCluster("C2", 15.05, 72.05, "Tuna", 60.0, 25.0, 28.0, 35.0, 0.9),
+        FishCluster("C3", 20.0, 80.0, "Sardine", 10.0, 10.0, 26.0, 34.0, 0.7)
     ]
-    zones = identify_pfz_zones(sample_obs)
-    assert len(zones) == 1
-    assert zones[0]['num_points'] == 4
+    spatial_index = FishClusterSpatialIndex(clusters)
+    
+    # Radius search of 20 km around (15.0, 72.0)
+    in_radius = spatial_index.find_clusters_in_zone(15.0, 72.0, radius_km=20.0)
+    cluster_ids = [c["payload"]["cluster_id"] for c in in_radius]
+    assert "C1" in cluster_ids
+    assert "C2" in cluster_ids
+    assert "C3" not in cluster_ids
+
+
+def test_ocean_pathfinding_current_assistance():
+    # 10x10 grid starting at lat 20.0, lon 70.0, spacing 0.1 deg (~6 NM / ~11 km)
+    graph = OceanGridGraph(rows=10, cols=10, top_left=(20.0, 70.0), res_deg=0.1)
+
+    start = (0, 0)
+    goal = (0, 9)
+
+    # Route with zero current
+    base_res = a_star_pathfinding(graph, start, goal, vessel_speed_knots=10.0)
+    assert base_res["success"] is True
+    base_time = base_res["total_time_hours"]
+
+    # Inject strong favorable tailwind/current (u = +5 knots Eastward) across the path
+    for c in range(10):
+        graph.set_current(0, c, u=5.0, v=0.0)
+
+    assisted_res = a_star_pathfinding(graph, start, goal, vessel_speed_knots=10.0)
+    assert assisted_res["success"] is True
+    assisted_time = assisted_res["total_time_hours"]
+
+    # Assisted time must be significantly less than baseline time
+    assert assisted_time < base_time
+
+
+def test_pathfinding_obstacle_avoidance():
+    graph = OceanGridGraph(rows=5, cols=5, top_left=(15.0, 70.0), res_deg=0.1)
+    start = (2, 0)
+    goal = (2, 4)
+
+    # Place a vertical wall of land blocks blocking direct path at col 2
+    for r in range(1, 4):
+        graph.set_obstacle(r, 2, is_land=True)
+
+    res = a_star_pathfinding(graph, start, goal, vessel_speed_knots=12.0)
+    assert res["success"] is True
+    
+    # Assert path stepped around obstacle
+    for wp in res["waypoints"]:
+        pos = wp["grid_pos"]
+        assert not (1 <= pos[0] <= 3 and pos[1] == 2)

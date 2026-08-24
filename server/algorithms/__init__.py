@@ -1,5 +1,20 @@
-from .kdtree import KDTree, haversine
-from .pathfinding import OceanGrid
-from .clustering import identify_pfz_zones, score_zone
+"""
+server/algorithms/__init__.py
+"""
 
-__all__ = ["KDTree", "haversine", "OceanGrid", "identify_pfz_zones", "score_zone"]
+from .kdtree import KDTree, KDNode, haversine_distance, euclidean_distance
+from .pathfinding import OceanGridGraph, a_star_pathfinding, dijkstra_pathfinding, OceanCell
+from .clustering import FishCluster, FishClusterSpatialIndex
+
+__all__ = [
+    "KDTree",
+    "KDNode",
+    "haversine_distance",
+    "euclidean_distance",
+    "OceanGridGraph",
+    "OceanCell",
+    "a_star_pathfinding",
+    "dijkstra_pathfinding",
+    "FishCluster",
+    "FishClusterSpatialIndex"
+]
