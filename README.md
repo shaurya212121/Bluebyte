@@ -4,7 +4,7 @@
     <strong>A Unified Data Platform for Oceanographic, Fisheries & Molecular Biodiversity Insight</strong>
   </p>
   <p align="center">
-    <em>Built for Smart India Hackathon 2025 — AI, Data Science & Intelligent Automation</em>
+    <em>Built for Smart India Hackathon 2026 — AI, Data Science & Intelligent Automation</em>
   </p>
   <p align="center">
     <a href="#overview">Overview</a> •
@@ -250,6 +250,6 @@ MIT — see [LICENSE](LICENSE).
 ---
 
 <p align="center">
-  <strong>Built for Smart India Hackathon 2025</strong><br>
+  <strong>Built for Smart India Hackathon 2026</strong><br>
   <em>AI, Data Science & Intelligent Automation Track</em>
 </p>
